@@ -5,7 +5,8 @@ import { useState } from "react";
 type ComicResult = {
   image: string;
   comic: any;
-  price: string;
+  ebayAverage: number | null;
+  whatnotPrice: number | null;
   ebayDebug: any;
   searchQuery: string;
 };
@@ -28,6 +29,22 @@ async function fileToBase64(file: File): Promise<string> {
   });
 }
 
+function calculateWhatnotPrice(ebayAverage: number | null) {
+  if (!ebayAverage || ebayAverage <= 0) return null;
+
+  return Math.ceil(ebayAverage * 1.15);
+}
+
+function getSubcategory(year: string) {
+  const numericYear = Number(year);
+
+  if (!numericYear || Number.isNaN(numericYear)) {
+    return "Modern Comics";
+  }
+
+  return numericYear < 1985 ? "Vintage Comics" : "Modern Comics";
+}
+
 export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
@@ -48,26 +65,23 @@ export default function Home() {
     setFiles(fileArray);
     setPreviews(fileArray.map((file) => URL.createObjectURL(file)));
     setResults([]);
-    setLoading(false);
     setStatus(`${fileArray.length} photo selected. Press Analyze.`);
   }
 
   async function analyzeComics() {
-    try {
-      if (files.length === 0) {
-        setStatus("Please choose a photo first.");
-        return;
-      }
+    if (files.length === 0) {
+      setStatus("Please choose a photo first.");
+      return;
+    }
 
-      setLoading(true);
-      setStatus("Scanning...");
-      setResults([]);
+    setLoading(true);
+    setStatus("Scanning...");
+    setResults([]);
 
-      const finalResults: ComicResult[] = [];
+    const finalResults: ComicResult[] = [];
 
-      for (let i = 0; i < files.length; i++) {
-        setStatus(`Scanning comic ${i + 1} of ${files.length}...`);
-
+    for (let i = 0; i < files.length; i++) {
+      try {
         const imageBase64 = await fileToBase64(files[i]);
 
         const response = await fetch("/api/analyze", {
@@ -110,38 +124,62 @@ export default function Home() {
 
         const ebayData = await ebayResponse.json();
 
-        const price =
+        const ebayAverage =
           ebayData.averagePrice && ebayData.averagePrice > 0
-            ? `£${ebayData.averagePrice.toFixed(2)}`
-            : "No price found";
+            ? Number(ebayData.averagePrice)
+            : null;
+
+        const whatnotPrice = calculateWhatnotPrice(ebayAverage);
 
         finalResults.push({
           image: previews[i],
           comic: comicData,
-          price,
+          ebayAverage,
+          whatnotPrice,
           ebayDebug: ebayData,
           searchQuery,
         });
 
         setResults([...finalResults]);
-      }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unknown error";
 
-      setStatus("Scan complete.");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      setStatus(`Error: ${message}`);
-    } finally {
-      setLoading(false);
+        finalResults.push({
+          image: previews[i] || "",
+          comic: {
+            title: "Error",
+            issue: "",
+            publisher: "",
+            year: "",
+            keyInfo: message,
+            condition: "Unknown",
+            conditionReason: "Unknown",
+          },
+          ebayAverage: null,
+          whatnotPrice: null,
+          ebayDebug: {},
+          searchQuery: "",
+        });
+
+        setResults([...finalResults]);
+        setStatus(`Error: ${message}`);
+      }
     }
+
+    setLoading(false);
+    setStatus("Scan complete.");
   }
 
   return (
     <main className="min-h-screen bg-black text-white p-5">
       <section className="max-w-6xl mx-auto">
-        <h1 className="text-4xl font-bold mb-4">Comic Scanner AI</h1>
+        <h1 className="text-4xl font-bold mb-4">
+          Comic Scanner AI
+        </h1>
 
         <p className="text-zinc-400 mb-6">
-          Upload comic covers and get UK market data.
+          Upload comic covers and get UK Whatnot listing prices.
         </p>
 
         <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-5">
@@ -197,17 +235,37 @@ export default function Home() {
                 </h2>
 
                 <p>
+                  <strong>Category:</strong> Comics & Manga
+                </p>
+
+                <p>
+                  <strong>Subcategory:</strong>{" "}
+                  {getSubcategory(item.comic.year)}
+                </p>
+
+                <p>
                   <strong>Publisher:</strong>{" "}
                   {item.comic.publisher || "Unknown"}
                 </p>
 
                 <p>
-                  <strong>Year:</strong> {item.comic.year || "Unknown"}
+                  <strong>Year:</strong>{" "}
+                  {item.comic.year || "Unknown"}
+                </p>
+
+                <p>
+                  <strong>Condition:</strong>{" "}
+                  {item.comic.condition || "Unknown"}
+                </p>
+
+                <p>
+                  <strong>Condition Reason:</strong>{" "}
+                  {item.comic.conditionReason || "Unknown"}
                 </p>
 
                 <p>
                   <strong>Key Info:</strong>{" "}
-                  {item.comic.keyInfo || item.comic.keyReason || "Unknown"}
+                  {item.comic.keyInfo || "Unknown"}
                 </p>
 
                 <p>
@@ -224,8 +282,24 @@ export default function Home() {
                   <strong>eBay Query:</strong> {item.searchQuery}
                 </p>
 
-                <div className="mt-5 bg-green-900 border border-green-700 rounded-xl p-4 text-2xl font-bold">
-                  {item.price}
+                <div className="mt-5 bg-zinc-800 border border-zinc-700 rounded-xl p-4 text-xl">
+                  <p>
+                    <strong>eBay Average:</strong>{" "}
+                    {item.ebayAverage
+                      ? `£${item.ebayAverage.toFixed(2)}`
+                      : "No price found"}
+                  </p>
+
+                  <p className="mt-2 text-green-400 text-3xl font-bold">
+                    Whatnot Price:{" "}
+                    {item.whatnotPrice
+                      ? `£${item.whatnotPrice}`
+                      : "No price found"}
+                  </p>
+
+                  <p className="text-sm text-zinc-400 mt-2">
+                    Formula: eBay average × 1.15, rounded up to whole £
+                  </p>
                 </div>
 
                 <details className="mt-5 bg-black border border-zinc-800 rounded-xl p-4">
