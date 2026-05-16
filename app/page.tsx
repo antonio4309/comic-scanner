@@ -31,7 +31,6 @@ async function fileToBase64(file: File): Promise<string> {
 
 function calculateWhatnotPrice(ebayAverage: number | null) {
   if (!ebayAverage || ebayAverage <= 0) return null;
-
   return Math.ceil(ebayAverage * 1.15);
 }
 
@@ -43,6 +42,14 @@ function getSubcategory(year: string) {
   }
 
   return numericYear < 1985 ? "Vintage Comics" : "Modern Comics";
+}
+
+function csvEscape(value: any) {
+  if (value === null || value === undefined) return "";
+
+  const stringValue = String(value).replace(/"/g, '""');
+
+  return `"${stringValue}"`;
 }
 
 export default function Home() {
@@ -171,6 +178,92 @@ export default function Home() {
     setStatus("Scan complete.");
   }
 
+  function exportWhatnotCSV() {
+    if (results.length === 0) {
+      setStatus("No scanned comics to export.");
+      return;
+    }
+
+    const headers = [
+      "Category",
+      "Subcategory",
+      "Title",
+      "Description",
+      "Quantity",
+      "Type",
+      "Price",
+      "Shipping Profile",
+      "Offerable",
+      "Hazmat",
+      "Condition",
+      "Cost Per Item",
+      "SKU",
+      "Image URL 1",
+      "Image URL 2",
+      "Image URL 3",
+      "Image URL 4",
+      "Image URL 5",
+      "Image URL 6",
+      "Image URL 7",
+      "Image URL 8",
+    ];
+
+    const rows = results.map((item) => {
+      const title = `${item.comic.title || "Unknown"} #${
+        item.comic.issue || ""
+      }`.trim();
+
+      const description =
+        item.comic.keyInfo ||
+        item.comic.keyReason ||
+        "Comic book listing.";
+
+      return [
+        "Comics & Manga",
+        getSubcategory(item.comic.year),
+        title,
+        description,
+        "1",
+        "Buy it Now",
+        item.whatnotPrice || "",
+        "Bagged and boarded raw comic",
+        "Yes",
+        "Not Hazmat",
+        item.comic.condition || "Unknown",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+      ];
+    });
+
+    const csvContent = [
+      headers.map(csvEscape).join(","),
+      ...rows.map((row) => row.map(csvEscape).join(",")),
+    ].join("\n");
+
+    const blob = new Blob([csvContent], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "whatnot-comics.csv";
+    link.click();
+
+    URL.revokeObjectURL(url);
+
+    setStatus("Whatnot CSV exported.");
+  }
+
   return (
     <main className="min-h-screen bg-black text-white p-5">
       <section className="max-w-6xl mx-auto">
@@ -200,6 +293,16 @@ export default function Home() {
           >
             {loading ? "Scanning..." : "Analyze"}
           </button>
+
+          {results.length > 0 && (
+            <button
+              type="button"
+              onClick={exportWhatnotCSV}
+              className="mt-4 w-full bg-blue-600 text-white font-bold py-4 rounded-xl text-xl"
+            >
+              Export Whatnot CSV
+            </button>
+          )}
 
           {previews.length > 0 && (
             <div className="grid grid-cols-2 gap-4 mt-6">
