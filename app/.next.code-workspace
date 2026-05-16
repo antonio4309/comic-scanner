@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "../.next"
+		},
+		{
+			"path": "."
+		},
+		{
+			"path": "../node_modules"
+		},
+		{
+			"path": "../public"
+		}
+	]
+}
