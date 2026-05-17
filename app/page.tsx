@@ -12,7 +12,9 @@ type ComicResult = {
   searchQuery: string;
 };
 
-async function compressImage(file: File): Promise<{
+async function compressImage(
+  file: File
+): Promise<{
   file: Blob;
   dataUrl: string;
 }> {
@@ -26,6 +28,7 @@ async function compressImage(file: File): Promise<{
 
     img.onload = () => {
       const canvas = document.createElement("canvas");
+
       const maxWidth = 1200;
       const scale = maxWidth / img.width;
 
@@ -41,12 +44,17 @@ async function compressImage(file: File): Promise<{
 
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+      const dataUrl = canvas.toDataURL(
+        "image/jpeg",
+        0.75
+      );
 
       canvas.toBlob(
         (blob) => {
           if (!blob) {
-            reject(new Error("Image compression failed"));
+            reject(
+              new Error("Compression failed")
+            );
             return;
           }
 
@@ -60,67 +68,103 @@ async function compressImage(file: File): Promise<{
       );
     };
 
-    img.onerror = () => reject(new Error("Image load failed"));
-    reader.onerror = () => reject(new Error("File reader failed"));
+    reader.onerror = () =>
+      reject(new Error("Reader failed"));
+
+    img.onerror = () =>
+      reject(new Error("Image failed"));
 
     reader.readAsDataURL(file);
   });
 }
 
-function calculateWhatnotPrice(ebayAverage: number | null) {
-  if (!ebayAverage || ebayAverage <= 0) return null;
+function calculateWhatnotPrice(
+  ebayAverage: number | null
+) {
+  if (!ebayAverage || ebayAverage <= 0) {
+    return null;
+  }
+
   return Math.ceil(ebayAverage * 1.15);
 }
 
 function getSubcategory(year: string) {
   const numericYear = Number(year);
 
-  if (!numericYear || Number.isNaN(numericYear)) {
+  if (!numericYear) {
     return "Modern Comics";
   }
 
-  return numericYear < 1985 ? "Vintage Comics" : "Modern Comics";
-}
-
-function csvEscape(value: any) {
-  if (value === null || value === undefined) return "";
-
-  const stringValue = String(value).replace(/"/g, '""');
-
-  return `"${stringValue}"`;
+  return numericYear < 1985
+    ? "Vintage Comics"
+    : "Modern Comics";
 }
 
 export default function Home() {
-  const [files, setFiles] = useState<File[]>([]);
-  const [previews, setPreviews] = useState<string[]>([]);
-  const [results, setResults] = useState<ComicResult[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState("Choose a photo to begin.");
+  const [files, setFiles] = useState<File[]>(
+    []
+  );
 
-  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const selectedFiles = event.target.files;
+  const [previews, setPreviews] = useState<
+    string[]
+  >([]);
 
-    if (!selectedFiles || selectedFiles.length === 0) {
-      setStatus("No photo selected.");
+  const [results, setResults] = useState<
+    ComicResult[]
+  >([]);
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [status, setStatus] = useState(
+    "Choose comics to scan."
+  );
+
+  function handleFileChange(
+    e: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const selectedFiles = e.target.files;
+
+    if (
+      !selectedFiles ||
+      selectedFiles.length === 0
+    ) {
       return;
     }
 
-    const fileArray = Array.from(selectedFiles);
+    const fileArray = Array.from(
+      selectedFiles
+    );
 
     setFiles(fileArray);
-    setPreviews(fileArray.map((file) => URL.createObjectURL(file)));
+
+    setPreviews(
+      fileArray.map((file) =>
+        URL.createObjectURL(file)
+      )
+    );
+
     setResults([]);
-    setStatus(`${fileArray.length} photo selected. Press Analyze.`);
+
+    setStatus(
+      `${fileArray.length} image selected`
+    );
   }
 
-  async function uploadImageToBlob(file: Blob, filename: string) {
-    const response = await fetch("/api/upload-image", {
-      method: "POST",
-      headers: {
-        "x-filename": filename,
-      },
-      body: file,
-    });
+  async function uploadImageToBlob(
+    file: Blob,
+    filename: string
+  ) {
+    const response = await fetch(
+      "/api/upload-image",
+      {
+        method: "POST",
+        headers: {
+          "x-filename": filename,
+        },
+        body: file,
+      }
+    );
 
     const data = await response.json();
 
@@ -133,79 +177,93 @@ export default function Home() {
 
   async function analyzeComics() {
     if (files.length === 0) {
-      setStatus("Please choose a photo first.");
+      setStatus(
+        "Please choose at least one image."
+      );
       return;
     }
 
     setLoading(true);
-    setStatus("Scanning...");
-    setResults([]);
 
     const finalResults: ComicResult[] = [];
 
-    for (let i = 0; i < files.length; i++) {
-      try {
-        setStatus(`Preparing image ${i + 1} of ${files.length}...`);
-
-        const compressed = await compressImage(files[i]);
-
-        setStatus(`Uploading image ${i + 1} to Vercel Blob...`);
-
-        const imageUrl = await uploadImageToBlob(
-          compressed.file,
-          `comic-${Date.now()}-${i + 1}.jpg`
+    try {
+      for (let i = 0; i < files.length; i++) {
+        setStatus(
+          `Scanning comic ${i + 1} of ${
+            files.length
+          }`
         );
 
-        setStatus(`AI scanning comic ${i + 1} of ${files.length}...`);
+        const compressed =
+          await compressImage(files[i]);
 
-        const response = await fetch("/api/analyze", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            image: compressed.dataUrl,
-          }),
-        });
+        const imageUrl =
+          await uploadImageToBlob(
+            compressed.file,
+            `comic-${Date.now()}-${i}.jpg`
+          );
 
-        const data = await response.json();
+        const analyzeResponse = await fetch(
+          "/api/analyze",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              image: compressed.dataUrl,
+            }),
+          }
+        );
 
-        if (data.error) {
-          throw new Error(data.error);
+        const analyzeData =
+          await analyzeResponse.json();
+
+        if (analyzeData.error) {
+          throw new Error(
+            analyzeData.error
+          );
         }
 
-        const cleanJson = data.result
-          .replace(/```json/g, "")
-          .replace(/```/g, "")
-          .trim();
+        const cleanJson =
+          analyzeData.result
+            .replace(/```json/g, "")
+            .replace(/```/g, "")
+            .trim();
 
-        const comicData = JSON.parse(cleanJson);
+        const comicData =
+          JSON.parse(cleanJson);
 
         const searchQuery =
-          comicData.ebaySearchQuery && comicData.ebaySearchQuery !== "Unknown"
-            ? comicData.ebaySearchQuery
-            : `${comicData.title} ${comicData.issue}`;
+          comicData.ebaySearchQuery ||
+          `${comicData.title} ${comicData.issue}`;
 
-        setStatus(`Checking eBay prices for comic ${i + 1}...`);
+        const ebayResponse = await fetch(
+          "/api/ebay",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              query: searchQuery,
+            }),
+          }
+        );
 
-        const ebayResponse = await fetch("/api/ebay", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            query: searchQuery,
-          }),
-        });
-
-        const ebayData = await ebayResponse.json();
+        const ebayData =
+          await ebayResponse.json();
 
         const ebayAverage =
-          ebayData.averagePrice && ebayData.averagePrice > 0
-            ? Number(ebayData.averagePrice)
-            : null;
+          ebayData.averagePrice || null;
 
-        const whatnotPrice = calculateWhatnotPrice(ebayAverage);
+        const whatnotPrice =
+          calculateWhatnotPrice(
+            ebayAverage
+          );
 
         finalResults.push({
           image: previews[i],
@@ -218,40 +276,23 @@ export default function Home() {
         });
 
         setResults([...finalResults]);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "Unknown error";
-
-        finalResults.push({
-          image: previews[i] || "",
-          imageUrl: "",
-          comic: {
-            title: "Error",
-            issue: "",
-            publisher: "",
-            year: "",
-            keyInfo: message,
-            condition: "Unknown",
-            conditionReason: "Unknown",
-          },
-          ebayAverage: null,
-          whatnotPrice: null,
-          ebayDebug: {},
-          searchQuery: "",
-        });
-
-        setResults([...finalResults]);
-        setStatus(`Error: ${message}`);
       }
+
+      setStatus("Finished scanning.");
+    } catch (error) {
+      console.error(error);
+
+      setStatus("Something went wrong");
     }
 
     setLoading(false);
-    setStatus("Scan complete.");
   }
 
   function exportWhatnotCSV() {
     if (results.length === 0) {
-      setStatus("No scanned comics to export.");
+      setStatus(
+        "No comics available to export."
+      );
       return;
     }
 
@@ -268,7 +309,7 @@ export default function Home() {
       "Hazmat",
       "Condition",
       "Cost Per Item",
-      "SKU",
+      "Sku",
       "Image URL 1",
       "Image URL 2",
       "Image URL 3",
@@ -280,14 +321,13 @@ export default function Home() {
     ];
 
     const rows = results.map((item) => {
-      const title = `${item.comic.title || "Unknown"} #${
-        item.comic.issue || ""
-      }`.trim();
+      const title = `${
+        item.comic.title || "Unknown"
+      } #${item.comic.issue || ""}`.trim();
 
       const description =
         item.comic.keyInfo ||
-        item.comic.keyReason ||
-        "Comic book listing.";
+        "Comic listing";
 
       return [
         "Comics & Manga",
@@ -300,7 +340,8 @@ export default function Home() {
         "Bagged and boarded raw comic",
         "Yes",
         "Not Hazmat",
-        item.comic.condition || "Unknown",
+        item.comic.condition ||
+          "Very Fine",
         "",
         "",
         item.imageUrl || "",
@@ -314,176 +355,181 @@ export default function Home() {
       ];
     });
 
-    const csvContent = [
-      headers.map(csvEscape).join(","),
-      ...rows.map((row) => row.map(csvEscape).join(",")),
-    ].join("\n");
+    const csvRows = [
+      headers.join(","),
+      ...rows.map((row) =>
+        row
+          .map(
+            (field) =>
+              `"${String(
+                field || ""
+              ).replace(/"/g, '""')}"`
+          )
+          .join(",")
+      ),
+    ];
 
-    const blob = new Blob([csvContent], {
-      type: "text/csv;charset=utf-8;",
-    });
+    const csvContent =
+      csvRows.join("\r\n");
 
-    const url = URL.createObjectURL(blob);
+    const blob = new Blob(
+      [csvContent],
+      {
+        type: "text/csv;charset=utf-8;",
+      }
+    );
 
-    const link = document.createElement("a");
+    const url =
+      URL.createObjectURL(blob);
+
+    const link =
+      document.createElement("a");
+
     link.href = url;
-    link.download = "whatnot-comics.csv";
+
+    link.setAttribute(
+      "download",
+      "whatnot-comics.csv"
+    );
+
+    document.body.appendChild(link);
+
     link.click();
+
+    document.body.removeChild(link);
 
     URL.revokeObjectURL(url);
 
-    setStatus("Whatnot CSV exported.");
+    setStatus(
+      "Whatnot CSV exported successfully."
+    );
   }
 
   return (
     <main className="min-h-screen bg-black text-white p-5">
-      <section className="max-w-6xl mx-auto">
-        <h1 className="text-4xl font-bold mb-4">
+      <div className="max-w-7xl mx-auto">
+        <h1 className="text-5xl font-bold mb-3">
           Comic Scanner AI
         </h1>
 
-        <p className="text-zinc-400 mb-6">
-          Upload comic covers and get UK Whatnot listing prices.
+        <p className="text-zinc-400 mb-8">
+          AI comic scanner for Whatnot UK
+          sellers.
         </p>
 
-        <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-5">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6">
           <input
             type="file"
             accept="image/*"
             multiple
+            capture="environment"
             onChange={handleFileChange}
-            className="block w-full bg-white text-black p-4 rounded-xl"
+            className="w-full bg-white text-black p-4 rounded-xl"
           />
 
-          <p className="mt-4 text-zinc-300">{status}</p>
-
           <button
-            type="button"
             onClick={analyzeComics}
-            className="mt-5 w-full bg-green-600 text-white font-bold py-4 rounded-xl text-xl"
+            disabled={loading}
+            className="w-full mt-5 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl text-xl"
           >
-            {loading ? "Scanning..." : "Analyze"}
+            {loading
+              ? "Scanning..."
+              : "Analyze"}
           </button>
 
           {results.length > 0 && (
             <button
-              type="button"
               onClick={exportWhatnotCSV}
-              className="mt-4 w-full bg-blue-600 text-white font-bold py-4 rounded-xl text-xl"
+              className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl text-xl"
             >
               Export Whatnot CSV
             </button>
           )}
 
-          {previews.length > 0 && (
-            <div className="grid grid-cols-2 gap-4 mt-6">
-              {previews.map((src, index) => (
-                <img
-                  key={index}
-                  src={src}
-                  alt={`Comic ${index + 1}`}
-                  className="rounded-xl border border-zinc-700"
-                />
-              ))}
-            </div>
-          )}
+          <p className="mt-5 text-zinc-300">
+            {status}
+          </p>
         </div>
 
         <div className="grid md:grid-cols-2 gap-8 mt-8">
           {results.map((item, index) => (
             <div
               key={index}
-              className="bg-zinc-900 rounded-3xl border border-zinc-800 overflow-hidden"
+              className="bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden"
             >
-              {item.image && (
-                <img
-                  src={item.image}
-                  alt="Comic"
-                  className="w-full h-[420px] object-cover"
-                />
-              )}
+              <img
+                src={item.image}
+                alt="Comic"
+                className="w-full h-[500px] object-cover"
+              />
 
               <div className="p-5">
-                <h2 className="text-2xl font-bold mb-4">
-                  {item.comic.title} #{item.comic.issue}
+                <h2 className="text-3xl font-bold mb-4">
+                  {item.comic.title} #
+                  {item.comic.issue}
                 </h2>
 
                 <p>
-                  <strong>Category:</strong> Comics & Manga
+                  <strong>
+                    Category:
+                  </strong>{" "}
+                  Comics & Manga
                 </p>
 
                 <p>
-                  <strong>Subcategory:</strong>{" "}
-                  {getSubcategory(item.comic.year)}
-                </p>
-
-                <p>
-                  <strong>Publisher:</strong>{" "}
-                  {item.comic.publisher || "Unknown"}
-                </p>
-
-                <p>
-                  <strong>Year:</strong>{" "}
-                  {item.comic.year || "Unknown"}
-                </p>
-
-                <p>
-                  <strong>Condition:</strong>{" "}
-                  {item.comic.condition || "Unknown"}
-                </p>
-
-                <p>
-                  <strong>Condition Reason:</strong>{" "}
-                  {item.comic.conditionReason || "Unknown"}
-                </p>
-
-                <p>
-                  <strong>Key Info:</strong>{" "}
-                  {item.comic.keyInfo || "Unknown"}
-                </p>
-
-                <p>
-                  <strong>Characters:</strong>{" "}
-                  {item.comic.importantCharacters || "Unknown"}
-                </p>
-
-                <p>
-                  <strong>Confidence:</strong>{" "}
-                  {item.comic.confidence || "Unknown"}
-                </p>
-
-                <p>
-                  <strong>Image URL:</strong>{" "}
-                  {item.imageUrl ? (
-                    <a
-                      href={item.imageUrl}
-                      target="_blank"
-                      className="text-blue-400 underline"
-                    >
-                      Open image
-                    </a>
-                  ) : (
-                    "Missing"
+                  <strong>
+                    Subcategory:
+                  </strong>{" "}
+                  {getSubcategory(
+                    item.comic.year
                   )}
                 </p>
 
-                <div className="mt-5 bg-zinc-800 border border-zinc-700 rounded-xl p-4 text-xl">
-                  <p>
-                    <strong>eBay Average:</strong>{" "}
+                <p>
+                  <strong>
+                    Condition:
+                  </strong>{" "}
+                  {item.comic.condition ||
+                    "Unknown"}
+                </p>
+
+                <p>
+                  <strong>
+                    Key Info:
+                  </strong>{" "}
+                  {item.comic.keyInfo ||
+                    "Unknown"}
+                </p>
+
+                <p>
+                  <strong>
+                    Image URL:
+                  </strong>{" "}
+                  <a
+                    href={item.imageUrl}
+                    target="_blank"
+                    className="text-blue-400 underline"
+                  >
+                    Open image
+                  </a>
+                </p>
+
+                <div className="mt-5 bg-zinc-800 rounded-2xl p-5">
+                  <p className="text-xl">
+                    <strong>
+                      eBay Average:
+                    </strong>{" "}
                     {item.ebayAverage
-                      ? `£${item.ebayAverage.toFixed(2)}`
+                      ? `£${Number(
+                          item.ebayAverage
+                        ).toFixed(2)}`
                       : "No price found"}
                   </p>
 
-                  <p className="mt-2 text-green-400 text-3xl font-bold">
-                    Whatnot Price:{" "}
+                  <p className="text-4xl text-green-400 font-bold mt-3">
                     {item.whatnotPrice
                       ? `£${item.whatnotPrice}`
                       : "No price found"}
-                  </p>
-
-                  <p className="text-sm text-zinc-400 mt-2">
-                    Formula: eBay average × 1.15, rounded up to whole £
                   </p>
                 </div>
 
@@ -492,15 +538,19 @@ export default function Home() {
                     eBay Debug
                   </summary>
 
-                  <pre className="mt-4 text-xs whitespace-pre-wrap overflow-x-auto">
-                    {JSON.stringify(item.ebayDebug, null, 2)}
+                  <pre className="mt-4 text-xs whitespace-pre-wrap">
+                    {JSON.stringify(
+                      item.ebayDebug,
+                      null,
+                      2
+                    )}
                   </pre>
                 </details>
               </div>
             </div>
           ))}
         </div>
-      </section>
+      </div>
     </main>
   );
 }
