@@ -1,6 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+const genAI = new GoogleGenerativeAI(
+  process.env.GEMINI_API_KEY || ""
+);
 
 function fallbackResult(reason: string) {
   return {
@@ -21,11 +23,14 @@ function fallbackResult(reason: string) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+
     const image = body.image;
 
     if (!image || !image.includes(",")) {
       return Response.json({
-        result: JSON.stringify(fallbackResult("No image provided")),
+        result: JSON.stringify(
+          fallbackResult("No image provided")
+        ),
       });
     }
 
@@ -33,50 +38,50 @@ export async function POST(req: Request) {
       model: "gemini-2.5-flash-lite",
     });
 
-    const result = await model.generateContent([
-      `
+    const result =
+      await model.generateContent([
+        `
 Analyze this comic book cover.
 
 Return ONLY valid JSON.
-No markdown.
-No code blocks.
-
-Use this exact format:
 
 {
-  "title": "Unknown",
-  "issue": "Unknown",
-  "publisher": "Unknown",
-  "year": "Unknown",
+  "title": "",
+  "issue": "",
+  "publisher": "",
+  "year": "",
   "variant": "",
-  "keyInfo": "Unknown",
-  "importantCharacters": "Unknown",
-  "confidence": "Low",
-  "condition": "Unknown",
-  "conditionReason": "Unknown",
-  "ebaySearchQuery": "Unknown"
+  "keyInfo": "",
+  "importantCharacters": "",
+  "confidence": "",
+  "condition": "",
+  "conditionReason": "",
+  "ebaySearchQuery": ""
 }
 
 Rules:
-- Identify the comic using visible cover text and cover art.
-- This may be a famous comic cover. Use visual recognition too.
-- If the cover has red/orange repeating 300 background with black costume Spider-Man, identify as The Amazing Spider-Man #300, Marvel, 1988.
-- Always return JSON.
-- Condition must be one of:
-  Near Mint, Very Fine, Fine, Very Good, Good, Fair, Poor, Unknown
-- Estimate condition from visible cover.
-- Do not use cover price as value.
-- ebaySearchQuery should be title + issue + publisher + year.
-      `,
-      {
-        inlineData: {
-          mimeType: image.startsWith("data:image/png")
-            ? "image/png"
-            : "image/jpeg",
-          data: image.split(",")[1],
+- Identify comic title and issue number.
+- Identify publisher and year.
+- Detect key issue info.
+- Estimate comic condition from visible front cover.
+- Condition must be:
+Near Mint, Very Fine, Fine, Very Good, Good, Fair, Poor, Unknown
+- ebaySearchQuery should contain title + issue + publisher + year.
+
+Special case:
+If you see a red/orange repeating 300 background with black suit Spider-Man, identify:
+Title: The Amazing Spider-Man
+Issue: 300
+Publisher: Marvel
+Year: 1988
+`,
+        {
+          inlineData: {
+            mimeType: "image/jpeg",
+            data: image.split(",")[1],
+          },
         },
-      },
-    ]);
+      ]);
 
     let text = result.response.text();
 
@@ -93,17 +98,35 @@ Rules:
       });
     } catch {
       return Response.json({
-        result: JSON.stringify(fallbackResult("AI returned invalid JSON")),
+        result: JSON.stringify(
+          fallbackResult(
+            "AI returned invalid data"
+          )
+        ),
       });
     }
-  } catch (error) {
-    console.error("Analyze Route Error:", error);
+  } catch (error: any) {
+    console.error(
+      "Analyze Route Error:",
+      error
+    );
+
+    let cleanMessage =
+      "AI could not analyze image";
+
+    if (
+      error?.status === 429 ||
+      String(error).includes(
+        "Too Many Requests"
+      )
+    ) {
+      cleanMessage =
+        "AI quota reached. Please wait 1 minute and try again.";
+    }
 
     return Response.json({
       result: JSON.stringify(
-        fallbackResult(
-          error instanceof Error ? error.message : "AI could not analyze image"
-        )
+        fallbackResult(cleanMessage)
       ),
     });
   }
