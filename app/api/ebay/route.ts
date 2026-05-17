@@ -10,17 +10,9 @@ export async function POST(req: Request) {
       });
     }
 
-    // Better comic filtering
+    // Better balanced filters
     const finalQuery = `
 ${query}
--complete
--set
--lot
--bundle
--cgc
--cbcs
--slab
--graded
 -facsimile
 -reprint
 -poster
@@ -28,8 +20,6 @@ ${query}
 -shirt
 -figure
 -funkopop
--signed
--damaged
 `.trim();
 
     const url = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(
@@ -45,9 +35,11 @@ ${query}
 
     const html = await response.text();
 
-    // Grab sold prices
+    // Extract GBP sold prices
     const matches = [
-      ...html.matchAll(/"price":"GBP ([0-9.,]+)"/g),
+      ...html.matchAll(
+        /"price":"GBP ([0-9.,]+)"/g
+      ),
     ];
 
     let prices = matches
