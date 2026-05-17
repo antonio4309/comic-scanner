@@ -28,7 +28,6 @@ async function compressImage(
 
     img.onload = () => {
       const canvas = document.createElement("canvas");
-
       const maxWidth = 1200;
       const scale = maxWidth / img.width;
 
@@ -44,17 +43,12 @@ async function compressImage(
 
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-      const dataUrl = canvas.toDataURL(
-        "image/jpeg",
-        0.75
-      );
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
 
       canvas.toBlob(
         (blob) => {
           if (!blob) {
-            reject(
-              new Error("Compression failed")
-            );
+            reject(new Error("Compression failed"));
             return;
           }
 
@@ -68,22 +62,15 @@ async function compressImage(
       );
     };
 
-    reader.onerror = () =>
-      reject(new Error("Reader failed"));
-
-    img.onerror = () =>
-      reject(new Error("Image failed"));
+    reader.onerror = () => reject(new Error("Reader failed"));
+    img.onerror = () => reject(new Error("Image failed"));
 
     reader.readAsDataURL(file);
   });
 }
 
-function calculateWhatnotPrice(
-  ebayAverage: number | null
-) {
-  if (!ebayAverage || ebayAverage <= 0) {
-    return null;
-  }
+function calculateWhatnotPrice(ebayAverage: number | null) {
+  if (!ebayAverage || ebayAverage <= 0) return null;
 
   return Math.ceil(ebayAverage * 1.15);
 }
@@ -91,80 +78,59 @@ function calculateWhatnotPrice(
 function getSubcategory(year: string) {
   const numericYear = Number(year);
 
-  if (!numericYear) {
+  if (!numericYear || Number.isNaN(numericYear)) {
     return "Modern Comics";
   }
 
-  return numericYear < 1985
-    ? "Vintage Comics"
-    : "Modern Comics";
+  return numericYear < 1985 ? "Vintage Comics" : "Modern Comics";
+}
+
+function cleanCSVValue(value: any) {
+  if (value === null || value === undefined) return "";
+
+  return String(value)
+    .replace(/"/g, '""')
+    .replace(/\r/g, " ")
+    .replace(/\n/g, " ")
+    .trim();
+}
+
+function csvCell(value: any) {
+  return `"${cleanCSVValue(value)}"`;
 }
 
 export default function Home() {
-  const [files, setFiles] = useState<File[]>(
-    []
-  );
+  const [files, setFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
+  const [results, setResults] = useState<ComicResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState("Choose comics to scan.");
 
-  const [previews, setPreviews] = useState<
-    string[]
-  >([]);
-
-  const [results, setResults] = useState<
-    ComicResult[]
-  >([]);
-
-  const [loading, setLoading] =
-    useState(false);
-
-  const [status, setStatus] = useState(
-    "Choose comics to scan."
-  );
-
-  function handleFileChange(
-    e: React.ChangeEvent<HTMLInputElement>
-  ) {
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const selectedFiles = e.target.files;
 
-    if (
-      !selectedFiles ||
-      selectedFiles.length === 0
-    ) {
+    if (!selectedFiles || selectedFiles.length === 0) {
+      setStatus("No image selected.");
       return;
     }
 
-    const fileArray = Array.from(
-      selectedFiles
-    );
+    const fileArray = Array.from(selectedFiles);
 
     setFiles(fileArray);
-
-    setPreviews(
-      fileArray.map((file) =>
-        URL.createObjectURL(file)
-      )
-    );
-
+    setPreviews(fileArray.map((file) => URL.createObjectURL(file)));
     setResults([]);
 
-    setStatus(
-      `${fileArray.length} image selected`
-    );
+    setStatus(`${fileArray.length} image selected.`);
   }
 
-  async function uploadImageToBlob(
-    file: Blob,
-    filename: string
-  ) {
-    const response = await fetch(
-      "/api/upload-image",
-      {
-        method: "POST",
-        headers: {
-          "x-filename": filename,
-        },
-        body: file,
-      }
-    );
+  async function uploadImageToBlob(file: Blob, filename: string) {
+    const response = await fetch("/api/upload-image", {
+      method: "POST",
+      headers: {
+        "x-filename": filename,
+      },
+      body: file,
+    });
 
     const data = await response.json();
 
@@ -177,93 +143,72 @@ export default function Home() {
 
   async function analyzeComics() {
     if (files.length === 0) {
-      setStatus(
-        "Please choose at least one image."
-      );
+      setStatus("Please choose at least one image.");
       return;
     }
 
     setLoading(true);
+    setResults([]);
 
     const finalResults: ComicResult[] = [];
 
     try {
       for (let i = 0; i < files.length; i++) {
-        setStatus(
-          `Scanning comic ${i + 1} of ${
-            files.length
-          }`
+        setStatus(`Scanning comic ${i + 1} of ${files.length}...`);
+
+        const compressed = await compressImage(files[i]);
+
+        const imageUrl = await uploadImageToBlob(
+          compressed.file,
+          `comic-${Date.now()}-${i + 1}.jpg`
         );
 
-        const compressed =
-          await compressImage(files[i]);
+        const analyzeResponse = await fetch("/api/analyze", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            image: compressed.dataUrl,
+          }),
+        });
 
-        const imageUrl =
-          await uploadImageToBlob(
-            compressed.file,
-            `comic-${Date.now()}-${i}.jpg`
-          );
-
-        const analyzeResponse = await fetch(
-          "/api/analyze",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify({
-              image: compressed.dataUrl,
-            }),
-          }
-        );
-
-        const analyzeData =
-          await analyzeResponse.json();
+        const analyzeData = await analyzeResponse.json();
 
         if (analyzeData.error) {
-          throw new Error(
-            analyzeData.error
-          );
+          throw new Error(analyzeData.error);
         }
 
-        const cleanJson =
-          analyzeData.result
-            .replace(/```json/g, "")
-            .replace(/```/g, "")
-            .trim();
+        const cleanJson = analyzeData.result
+          .replace(/```json/g, "")
+          .replace(/```/g, "")
+          .trim();
 
-        const comicData =
-          JSON.parse(cleanJson);
+        const comicData = JSON.parse(cleanJson);
 
         const searchQuery =
-          comicData.ebaySearchQuery ||
-          `${comicData.title} ${comicData.issue}`;
+          comicData.ebaySearchQuery && comicData.ebaySearchQuery !== "Unknown"
+            ? comicData.ebaySearchQuery
+            : `${comicData.title} ${comicData.issue}`;
 
-        const ebayResponse = await fetch(
-          "/api/ebay",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify({
-              query: searchQuery,
-            }),
-          }
-        );
+        const ebayResponse = await fetch("/api/ebay", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            query: searchQuery,
+          }),
+        });
 
-        const ebayData =
-          await ebayResponse.json();
+        const ebayData = await ebayResponse.json();
 
         const ebayAverage =
-          ebayData.averagePrice || null;
+          ebayData.averagePrice && ebayData.averagePrice > 0
+            ? Number(ebayData.averagePrice)
+            : null;
 
-        const whatnotPrice =
-          calculateWhatnotPrice(
-            ebayAverage
-          );
+        const whatnotPrice = calculateWhatnotPrice(ebayAverage);
 
         finalResults.push({
           image: previews[i],
@@ -281,8 +226,7 @@ export default function Home() {
       setStatus("Finished scanning.");
     } catch (error) {
       console.error(error);
-
-      setStatus("Something went wrong");
+      setStatus(error instanceof Error ? error.message : "Something went wrong");
     }
 
     setLoading(false);
@@ -290,9 +234,7 @@ export default function Home() {
 
   function exportWhatnotCSV() {
     if (results.length === 0) {
-      setStatus(
-        "No comics available to export."
-      );
+      setStatus("No comics available to export.");
       return;
     }
 
@@ -321,13 +263,14 @@ export default function Home() {
     ];
 
     const rows = results.map((item) => {
-      const title = `${
-        item.comic.title || "Unknown"
-      } #${item.comic.issue || ""}`.trim();
+      const title = `${item.comic.title || "Unknown"} #${
+        item.comic.issue || ""
+      }`.trim();
 
       const description =
         item.comic.keyInfo ||
-        "Comic listing";
+        item.comic.keyReason ||
+        "Comic book listing";
 
       return [
         "Comics & Manga",
@@ -340,8 +283,7 @@ export default function Home() {
         "Bagged and boarded raw comic",
         "Yes",
         "Not Hazmat",
-        item.comic.condition ||
-          "Very Fine",
+        item.comic.condition || "Very Fine",
         "",
         "",
         item.imageUrl || "",
@@ -356,65 +298,38 @@ export default function Home() {
     });
 
     const csvRows = [
-      headers.join(","),
-      ...rows.map((row) =>
-        row
-          .map(
-            (field) =>
-              `"${String(
-                field || ""
-              ).replace(/"/g, '""')}"`
-          )
-          .join(",")
-      ),
+      headers.map(csvCell).join(","),
+      ...rows.map((row) => row.map(csvCell).join(",")),
     ];
 
-    const csvContent =
-      csvRows.join("\r\n");
+    const csvContent = csvRows.join("\r\n");
 
-    const blob = new Blob(
-      [csvContent],
-      {
-        type: "text/csv;charset=utf-8;",
-      }
-    );
+    const blob = new Blob([csvContent], {
+      type: "text/csv;charset=utf-8",
+    });
 
-    const url =
-      URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
 
-    const link =
-      document.createElement("a");
-
+    const link = document.createElement("a");
     link.href = url;
-
-    link.setAttribute(
-      "download",
-      "whatnot-comics.csv"
-    );
+    link.download = "whatnot-comics.csv";
 
     document.body.appendChild(link);
-
     link.click();
-
     document.body.removeChild(link);
 
     URL.revokeObjectURL(url);
 
-    setStatus(
-      "Whatnot CSV exported successfully."
-    );
+    setStatus("Whatnot CSV exported.");
   }
 
   return (
     <main className="min-h-screen bg-black text-white p-5">
       <div className="max-w-7xl mx-auto">
-        <h1 className="text-5xl font-bold mb-3">
-          Comic Scanner AI
-        </h1>
+        <h1 className="text-5xl font-bold mb-3">Comic Scanner AI</h1>
 
         <p className="text-zinc-400 mb-8">
-          AI comic scanner for Whatnot UK
-          sellers.
+          AI comic scanner for Whatnot UK sellers.
         </p>
 
         <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6">
@@ -422,7 +337,6 @@ export default function Home() {
             type="file"
             accept="image/*"
             multiple
-            capture="environment"
             onChange={handleFileChange}
             className="w-full bg-white text-black p-4 rounded-xl"
           />
@@ -432,9 +346,7 @@ export default function Home() {
             disabled={loading}
             className="w-full mt-5 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl text-xl"
           >
-            {loading
-              ? "Scanning..."
-              : "Analyze"}
+            {loading ? "Scanning..." : "Analyze"}
           </button>
 
           {results.length > 0 && (
@@ -446,9 +358,7 @@ export default function Home() {
             </button>
           )}
 
-          <p className="mt-5 text-zinc-300">
-            {status}
-          </p>
+          <p className="mt-5 text-zinc-300">{status}</p>
         </div>
 
         <div className="grid md:grid-cols-2 gap-8 mt-8">
@@ -465,68 +375,67 @@ export default function Home() {
 
               <div className="p-5">
                 <h2 className="text-3xl font-bold mb-4">
-                  {item.comic.title} #
-                  {item.comic.issue}
+                  {item.comic.title} #{item.comic.issue}
                 </h2>
 
                 <p>
-                  <strong>
-                    Category:
-                  </strong>{" "}
-                  Comics & Manga
+                  <strong>Category:</strong> Comics & Manga
                 </p>
 
                 <p>
-                  <strong>
-                    Subcategory:
-                  </strong>{" "}
-                  {getSubcategory(
-                    item.comic.year
+                  <strong>Subcategory:</strong>{" "}
+                  {getSubcategory(item.comic.year)}
+                </p>
+
+                <p>
+                  <strong>Publisher:</strong>{" "}
+                  {item.comic.publisher || "Unknown"}
+                </p>
+
+                <p>
+                  <strong>Year:</strong> {item.comic.year || "Unknown"}
+                </p>
+
+                <p>
+                  <strong>Condition:</strong>{" "}
+                  {item.comic.condition || "Unknown"}
+                </p>
+
+                <p>
+                  <strong>Condition Reason:</strong>{" "}
+                  {item.comic.conditionReason || "Unknown"}
+                </p>
+
+                <p>
+                  <strong>Key Info:</strong>{" "}
+                  {item.comic.keyInfo || item.comic.keyReason || "Unknown"}
+                </p>
+
+                <p>
+                  <strong>Image URL:</strong>{" "}
+                  {item.imageUrl ? (
+                    <a
+                      href={item.imageUrl}
+                      target="_blank"
+                      className="text-blue-400 underline"
+                    >
+                      Open image
+                    </a>
+                  ) : (
+                    "Missing"
                   )}
-                </p>
-
-                <p>
-                  <strong>
-                    Condition:
-                  </strong>{" "}
-                  {item.comic.condition ||
-                    "Unknown"}
-                </p>
-
-                <p>
-                  <strong>
-                    Key Info:
-                  </strong>{" "}
-                  {item.comic.keyInfo ||
-                    "Unknown"}
-                </p>
-
-                <p>
-                  <strong>
-                    Image URL:
-                  </strong>{" "}
-                  <a
-                    href={item.imageUrl}
-                    target="_blank"
-                    className="text-blue-400 underline"
-                  >
-                    Open image
-                  </a>
                 </p>
 
                 <div className="mt-5 bg-zinc-800 rounded-2xl p-5">
                   <p className="text-xl">
-                    <strong>
-                      eBay Average:
-                    </strong>{" "}
+                    <strong>eBay Average:</strong>{" "}
                     {item.ebayAverage
-                      ? `£${Number(
-                          item.ebayAverage
-                        ).toFixed(2)}`
+                      ? `£${Number(item.ebayAverage).toFixed(2)}`
                       : "No price found"}
                   </p>
 
                   <p className="text-4xl text-green-400 font-bold mt-3">
+                    Whatnot Price:{" "}
                     {item.whatnotPrice
                       ? `£${item.whatnotPrice}`
                       : "No price found"}
@@ -539,11 +448,7 @@ export default function Home() {
                   </summary>
 
                   <pre className="mt-4 text-xs whitespace-pre-wrap">
-                    {JSON.stringify(
-                      item.ebayDebug,
-                      null,
-                      2
-                    )}
+                    {JSON.stringify(item.ebayDebug, null, 2)}
                   </pre>
                 </details>
               </div>
