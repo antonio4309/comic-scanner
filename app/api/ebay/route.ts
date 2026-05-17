@@ -1,89 +1,87 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-const genAI = new GoogleGenerativeAI(
-  process.env.GEMINI_API_KEY || ""
-);
+import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const image = body.image;
+    const query = body.query;
 
-    if (!image || !image.includes(",")) {
-      return Response.json(
-        { error: "No image provided" },
+    if (!query) {
+      return NextResponse.json(
+        { error: "No search query provided" },
         { status: 400 }
       );
     }
 
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash-lite",
-    });
+    const auth = Buffer.from(
+      `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
+    ).toString("base64");
 
-    const result = await model.generateContent([
-      `
-Analyze this comic book cover.
-
-Return ONLY valid JSON.
-No markdown.
-No code blocks.
-
-Use this exact format:
-
-{
-  "title": "Unknown",
-  "issue": "Unknown",
-  "publisher": "Unknown",
-  "year": "Unknown",
-  "variant": "",
-  "keyInfo": "Unknown",
-  "importantCharacters": "Unknown",
-  "confidence": "High, Medium, or Low",
-  "condition": "Unknown",
-  "conditionReason": "Unknown",
-  "ebaySearchQuery": "Unknown"
-}
-
-Condition options:
-- Near Mint
-- Very Fine
-- Fine
-- Very Good
-- Good
-- Fair
-- Poor
-- Unknown
-
-Rules:
-- Estimate condition from visible cover only.
-- Mention visible defects: spine ticks, creases, tears, stains, rounded corners, fading, writing, missing pieces.
-- Do NOT use cover price as value.
-- If unsure, use "Unknown".
-- ebaySearchQuery should be short and clean.
-Example:
-"Amazing Spider-Man 300 Marvel 1988"
-      `,
+    const tokenRes = await fetch(
+      "https://api.ebay.com/identity/v1/oauth2/token",
       {
-        inlineData: {
-          mimeType: image.startsWith("data:image/png")
-            ? "image/png"
-            : "image/jpeg",
-          data: image.split(",")[1],
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${auth}`,
+          "Content-Type": "application/x-www-form-urlencoded",
         },
-      },
-    ]);
+        body: "grant_type=client_credentials&scope=https://api.ebay.com/oauth/api_scope",
+      }
+    );
 
-    const response = await result.response;
-    const text = response.text();
+    const tokenData = await tokenRes.json();
 
-    return Response.json({
-      result: text,
+    if (!tokenData.access_token) {
+      return NextResponse.json({
+        error: "Could not get eBay token",
+        details: tokenData,
+      });
+    }
+
+    const ebayRes = await fetch(
+      `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(
+        query
+      )}&limit=20`,
+      {
+        headers: {
+          Authorization: `Bearer ${tokenData.access_token}`,
+          "X-EBAY-C-MARKETPLACE-ID": "EBAY_GB",
+        },
+      }
+    );
+
+    const ebayData = await ebayRes.json();
+
+    const items = ebayData.itemSummaries || [];
+
+    const prices = items
+      .map((item: any) => Number(item.price?.value))
+      .filter((price: number) => price > 0);
+
+    const averagePrice =
+      prices.length > 0
+        ? prices.reduce((a: number, b: number) => a + b, 0) / prices.length
+        : null;
+
+    return NextResponse.json({
+      query,
+      source: "eBay UK active listings average",
+      totalFound: ebayData.total || 0,
+      count: items.length,
+      averagePrice,
+      currency: "GBP",
+      items: items.map((item: any) => ({
+        title: item.title,
+        price: item.price,
+        condition: item.condition,
+        url: item.itemWebUrl,
+        image: item.image?.imageUrl,
+      })),
     });
   } catch (error) {
-    console.error("Gemini error:", error);
+    console.error("eBay API error:", error);
 
-    return Response.json(
-      { error: "Something went wrong" },
+    return NextResponse.json(
+      { error: "eBay request failed" },
       { status: 500 }
     );
   }
