@@ -4,6 +4,7 @@ import { useState } from "react";
 
 type ComicResult = {
   image: string;
+  imageUrl: string;
   comic: any;
   ebayAverage: number | null;
   whatnotPrice: number | null;
@@ -11,20 +12,57 @@ type ComicResult = {
   searchQuery: string;
 };
 
-async function fileToBase64(file: File): Promise<string> {
+async function compressImage(file: File): Promise<{
+  file: Blob;
+  dataUrl: string;
+}> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    const img = new Image();
 
     reader.onload = () => {
-      if (!reader.result) {
-        reject(new Error("Could not read image"));
+      img.src = reader.result as string;
+    };
+
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const maxWidth = 1200;
+      const scale = maxWidth / img.width;
+
+      canvas.width = maxWidth;
+      canvas.height = img.height * scale;
+
+      const ctx = canvas.getContext("2d");
+
+      if (!ctx) {
+        reject(new Error("Canvas failed"));
         return;
       }
 
-      resolve(reader.result as string);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error("Image compression failed"));
+            return;
+          }
+
+          resolve({
+            file: blob,
+            dataUrl,
+          });
+        },
+        "image/jpeg",
+        0.75
+      );
     };
 
+    img.onerror = () => reject(new Error("Image load failed"));
     reader.onerror = () => reject(new Error("File reader failed"));
+
     reader.readAsDataURL(file);
   });
 }
@@ -75,6 +113,24 @@ export default function Home() {
     setStatus(`${fileArray.length} photo selected. Press Analyze.`);
   }
 
+  async function uploadImageToBlob(file: Blob, filename: string) {
+    const response = await fetch("/api/upload-image", {
+      method: "POST",
+      headers: {
+        "x-filename": filename,
+      },
+      body: file,
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
+    return data.url as string;
+  }
+
   async function analyzeComics() {
     if (files.length === 0) {
       setStatus("Please choose a photo first.");
@@ -89,7 +145,18 @@ export default function Home() {
 
     for (let i = 0; i < files.length; i++) {
       try {
-        const imageBase64 = await fileToBase64(files[i]);
+        setStatus(`Preparing image ${i + 1} of ${files.length}...`);
+
+        const compressed = await compressImage(files[i]);
+
+        setStatus(`Uploading image ${i + 1} to Vercel Blob...`);
+
+        const imageUrl = await uploadImageToBlob(
+          compressed.file,
+          `comic-${Date.now()}-${i + 1}.jpg`
+        );
+
+        setStatus(`AI scanning comic ${i + 1} of ${files.length}...`);
 
         const response = await fetch("/api/analyze", {
           method: "POST",
@@ -97,7 +164,7 @@ export default function Home() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            image: imageBase64,
+            image: compressed.dataUrl,
           }),
         });
 
@@ -118,6 +185,8 @@ export default function Home() {
           comicData.ebaySearchQuery && comicData.ebaySearchQuery !== "Unknown"
             ? comicData.ebaySearchQuery
             : `${comicData.title} ${comicData.issue}`;
+
+        setStatus(`Checking eBay prices for comic ${i + 1}...`);
 
         const ebayResponse = await fetch("/api/ebay", {
           method: "POST",
@@ -140,6 +209,7 @@ export default function Home() {
 
         finalResults.push({
           image: previews[i],
+          imageUrl,
           comic: comicData,
           ebayAverage,
           whatnotPrice,
@@ -154,6 +224,7 @@ export default function Home() {
 
         finalResults.push({
           image: previews[i] || "",
+          imageUrl: "",
           comic: {
             title: "Error",
             issue: "",
@@ -232,7 +303,7 @@ export default function Home() {
         item.comic.condition || "Unknown",
         "",
         "",
-        "",
+        item.imageUrl || "",
         "",
         "",
         "",
@@ -382,7 +453,18 @@ export default function Home() {
                 </p>
 
                 <p>
-                  <strong>eBay Query:</strong> {item.searchQuery}
+                  <strong>Image URL:</strong>{" "}
+                  {item.imageUrl ? (
+                    <a
+                      href={item.imageUrl}
+                      target="_blank"
+                      className="text-blue-400 underline"
+                    >
+                      Open image
+                    </a>
+                  ) : (
+                    "Missing"
+                  )}
                 </p>
 
                 <div className="mt-5 bg-zinc-800 border border-zinc-700 rounded-xl p-4 text-xl">
