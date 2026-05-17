@@ -29,15 +29,14 @@ export async function POST(req: Request) {
     if (!query || query === "Unknown") {
       return NextResponse.json({
         query,
-        totalFound: 0,
-        count: 0,
+        soldCount: 0,
+        prices: [],
         averagePrice: null,
-        currency: "GBP",
         items: [],
       });
     }
 
-    const auth = Buffer.from(
+    const credentials = Buffer.from(
       `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
     ).toString("base64");
 
@@ -46,7 +45,7 @@ export async function POST(req: Request) {
       {
         method: "POST",
         headers: {
-          Authorization: `Basic ${auth}`,
+          Authorization: `Basic ${credentials}`,
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: "grant_type=client_credentials&scope=https://api.ebay.com/oauth/api_scope",
@@ -54,29 +53,29 @@ export async function POST(req: Request) {
     );
 
     const tokenData = await tokenRes.json();
+    const accessToken = tokenData.access_token;
 
-    if (!tokenData.access_token) {
+    if (!accessToken) {
       return NextResponse.json({
-        error: "Could not get eBay token",
-        details: tokenData,
+        error: "No eBay token",
+        tokenData,
       });
     }
 
-    const ebayRes = await fetch(
+    const searchRes = await fetch(
       `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(
         query
       )}&limit=50`,
       {
         headers: {
-          Authorization: `Bearer ${tokenData.access_token}`,
+          Authorization: `Bearer ${accessToken}`,
           "X-EBAY-C-MARKETPLACE-ID": "EBAY_GB",
         },
       }
     );
 
-    const ebayData = await ebayRes.json();
-
-    const items = ebayData.itemSummaries || [];
+    const data = await searchRes.json();
+    const items = data.itemSummaries || [];
 
     const filteredItems = items.filter((item: any) => {
       const title = item.title || "";
@@ -90,27 +89,23 @@ export async function POST(req: Request) {
 
     let prices = filteredItems
       .map((item: any) => Number(item.price?.value))
-      .filter((price: number) => price > 0);
+      .filter((price: number) => price > 1 && price < 100000);
 
     prices = prices.sort((a: number, b: number) => a - b);
 
-    if (prices.length > 6) {
-      prices = prices.slice(1, prices.length - 1);
-    }
+    let averagePrice = null;
 
-    const averagePrice =
-      prices.length > 0
-        ? prices.reduce((a: number, b: number) => a + b, 0) / prices.length
-        : null;
+    if (prices.length > 0) {
+      const index = Math.floor(prices.length * 0.3);
+      averagePrice = prices[index];
+    }
 
     return NextResponse.json({
       query,
-      source: "eBay UK active listings average",
-      totalFound: ebayData.total || 0,
-      count: filteredItems.length,
-      averagePrice,
-      currency: "GBP",
+      source: "eBay UK active listings conservative price",
+      soldCount: prices.length,
       prices,
+      averagePrice,
       items: filteredItems.slice(0, 10).map((item: any) => ({
         title: item.title,
         price: item.price,
@@ -120,11 +115,10 @@ export async function POST(req: Request) {
       })),
     });
   } catch (error) {
-    console.error("eBay API error:", error);
+    console.error("eBay API Error:", error);
 
-    return NextResponse.json(
-      { error: "eBay request failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      error: "eBay API failed",
+    });
   }
 }
