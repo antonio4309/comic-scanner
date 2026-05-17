@@ -12,31 +12,31 @@ export async function POST(req: Request) {
 
     const finalQuery = `
 ${query}
--facsimile
--reprint
--poster
--print
--shirt
--figure
--funkopop
+comic
 `.trim();
 
-    const url = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(
-      finalQuery
-    )}&LH_Sold=1&LH_Complete=1`;
+    const url =
+      `https://www.ebay.co.uk/sch/i.html?_nkw=${encodeURIComponent(
+        finalQuery
+      )}` +
+      `&LH_Sold=1&LH_Complete=1&_ipg=60`;
 
     const response = await fetch(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        Accept:
+          "text/html,application/xhtml+xml",
+        "Accept-Language": "en-GB,en;q=0.9",
       },
+      cache: "no-store",
     });
 
     const html = await response.text();
 
-    // Better regex
+    // Extract £ prices
     const regex =
-      /£\s?([0-9]+(?:\.[0-9]{1,2})?)/g;
+      /£([0-9]+(?:\.[0-9]{1,2})?)/g;
 
     const matches = [
       ...html.matchAll(regex),
@@ -47,7 +47,7 @@ ${query}
       .filter(
         (p) =>
           !isNaN(p) &&
-          p > 1 &&
+          p > 5 &&
           p < 100000
       );
 
@@ -57,7 +57,7 @@ ${query}
     // Remove outliers
     prices = prices.sort((a, b) => a - b);
 
-    if (prices.length > 8) {
+    if (prices.length > 10) {
       prices = prices.slice(
         1,
         prices.length - 1
@@ -79,6 +79,7 @@ ${query}
       soldCount: prices.length,
       prices,
       averagePrice,
+      sampleHtml: html.slice(0, 500),
     });
   } catch (error) {
     console.error(
