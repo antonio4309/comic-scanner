@@ -10,7 +10,6 @@ export async function POST(req: Request) {
       });
     }
 
-    // Better balanced filters
     const finalQuery = `
 ${query}
 -facsimile
@@ -29,27 +28,22 @@ ${query}
     const response = await fetch(url, {
       headers: {
         "User-Agent":
-          "Mozilla/5.0",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
       },
     });
 
     const html = await response.text();
 
-    // Extract GBP sold prices
+    // Better regex
+    const regex =
+      /£\s?([0-9]+(?:\.[0-9]{1,2})?)/g;
+
     const matches = [
-      ...html.matchAll(
-        /"price":"GBP ([0-9.,]+)"/g
-      ),
+      ...html.matchAll(regex),
     ];
 
     let prices = matches
-      .map((m) =>
-        Number(
-          m[1]
-            .replace(/,/g, "")
-            .trim()
-        )
-      )
+      .map((m) => Number(m[1]))
       .filter(
         (p) =>
           !isNaN(p) &&
@@ -57,10 +51,13 @@ ${query}
           p < 100000
       );
 
-    // Remove extreme outliers
+    // Remove duplicates
+    prices = [...new Set(prices)];
+
+    // Remove outliers
     prices = prices.sort((a, b) => a - b);
 
-    if (prices.length > 6) {
+    if (prices.length > 8) {
       prices = prices.slice(
         1,
         prices.length - 1
