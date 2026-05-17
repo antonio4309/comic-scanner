@@ -1,97 +1,130 @@
+import { NextResponse } from "next/server";
+
+function isBadListing(title: string) {
+  const lower = title.toLowerCase();
+
+  const badWords = [
+    "facsimile",
+    "reprint",
+    "poster",
+    "print",
+    "shirt",
+    "figure",
+    "funko",
+    "pop",
+    "dvd",
+    "blu-ray",
+    "sticker",
+    "card",
+  ];
+
+  return badWords.some((word) => lower.includes(word));
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-
     const query = body.query;
 
-    if (!query) {
-      return Response.json({
-        error: "No search query",
+    if (!query || query === "Unknown") {
+      return NextResponse.json({
+        query,
+        totalFound: 0,
+        count: 0,
+        averagePrice: null,
+        currency: "GBP",
+        items: [],
       });
     }
 
-    const finalQuery = `
-${query}
-comic
-`.trim();
+    const auth = Buffer.from(
+      `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
+    ).toString("base64");
 
-    const url =
-      `https://www.ebay.co.uk/sch/i.html?_nkw=${encodeURIComponent(
-        finalQuery
-      )}` +
-      `&LH_Sold=1&LH_Complete=1&_ipg=60`;
-
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        Accept:
-          "text/html,application/xhtml+xml",
-        "Accept-Language": "en-GB,en;q=0.9",
-      },
-      cache: "no-store",
-    });
-
-    const html = await response.text();
-
-    // Extract £ prices
-    const regex =
-      /£([0-9]+(?:\.[0-9]{1,2})?)/g;
-
-    const matches = [
-      ...html.matchAll(regex),
-    ];
-
-    let prices = matches
-      .map((m) => Number(m[1]))
-      .filter(
-        (p) =>
-          !isNaN(p) &&
-          p > 5 &&
-          p < 100000
-      );
-
-    // Remove duplicates
-    prices = [...new Set(prices)];
-
-    // Remove outliers
-    prices = prices.sort((a, b) => a - b);
-
-    if (prices.length > 10) {
-      prices = prices.slice(
-        1,
-        prices.length - 1
-      );
-    }
-
-    let averagePrice = null;
-
-    if (prices.length > 0) {
-      averagePrice =
-        prices.reduce(
-          (sum, p) => sum + p,
-          0
-        ) / prices.length;
-    }
-
-    return Response.json({
-      query: finalQuery,
-      soldCount: prices.length,
-      prices,
-      averagePrice,
-      sampleHtml: html.slice(0, 500),
-    });
-  } catch (error) {
-    console.error(
-      "eBay route error:",
-      error
+    const tokenRes = await fetch(
+      "https://api.ebay.com/identity/v1/oauth2/token",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${auth}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: "grant_type=client_credentials&scope=https://api.ebay.com/oauth/api_scope",
+      }
     );
 
-    return Response.json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "eBay lookup failed",
+    const tokenData = await tokenRes.json();
+
+    if (!tokenData.access_token) {
+      return NextResponse.json({
+        error: "Could not get eBay token",
+        details: tokenData,
+      });
+    }
+
+    const ebayRes = await fetch(
+      `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(
+        query
+      )}&limit=50`,
+      {
+        headers: {
+          Authorization: `Bearer ${tokenData.access_token}`,
+          "X-EBAY-C-MARKETPLACE-ID": "EBAY_GB",
+        },
+      }
+    );
+
+    const ebayData = await ebayRes.json();
+
+    const items = ebayData.itemSummaries || [];
+
+    const filteredItems = items.filter((item: any) => {
+      const title = item.title || "";
+      const price = Number(item.price?.value);
+
+      if (!price || price <= 0) return false;
+      if (isBadListing(title)) return false;
+
+      return true;
     });
+
+    let prices = filteredItems
+      .map((item: any) => Number(item.price?.value))
+      .filter((price: number) => price > 0);
+
+    prices = prices.sort((a: number, b: number) => a - b);
+
+    if (prices.length > 6) {
+      prices = prices.slice(1, prices.length - 1);
+    }
+
+    const averagePrice =
+      prices.length > 0
+        ? prices.reduce((a: number, b: number) => a + b, 0) / prices.length
+        : null;
+
+    return NextResponse.json({
+      query,
+      source: "eBay UK active listings average",
+      totalFound: ebayData.total || 0,
+      count: filteredItems.length,
+      averagePrice,
+      currency: "GBP",
+      prices,
+      items: filteredItems.slice(0, 10).map((item: any) => ({
+        title: item.title,
+        price: item.price,
+        condition: item.condition,
+        url: item.itemWebUrl,
+        image: item.image?.imageUrl,
+      })),
+    });
+  } catch (error) {
+    console.error("eBay API error:", error);
+
+    return NextResponse.json(
+      { error: "eBay request failed" },
+      { status: 500 }
+    );
   }
 }
