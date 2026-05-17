@@ -18,24 +18,30 @@ function fallbackResult(reason: string) {
   };
 }
 
-function cleanJsonText(text: string) {
-  return text
-    .replace(/```json/g, "")
-    .replace(/```/g, "")
-    .trim();
-}
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const image = body.image;
 
-async function tryAnalyzeWithModel(modelName: string, image: string) {
-  const model = genAI.getGenerativeModel({
-    model: modelName,
-  });
+    if (!image || !image.includes(",")) {
+      return Response.json({
+        result: JSON.stringify(fallbackResult("No image provided")),
+      });
+    }
 
-  const prompt = `
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash-lite",
+    });
+
+    const result = await model.generateContent([
+      `
 Analyze this comic book cover.
 
-Return ONLY valid JSON. No markdown. No explanation.
+Return ONLY valid JSON.
+No markdown.
+No code blocks.
 
-Use this exact JSON shape:
+Use this exact format:
 
 {
   "title": "Unknown",
@@ -51,79 +57,52 @@ Use this exact JSON shape:
   "ebaySearchQuery": "Unknown"
 }
 
-Important:
-- Identify the comic title and issue number from the cover.
-- Estimate condition from visible front cover.
-- Condition must be one of: Near Mint, Very Fine, Fine, Very Good, Good, Fair, Poor, Unknown.
+Rules:
+- Identify the comic using visible cover text and cover art.
+- This may be a famous comic cover. Use visual recognition too.
+- If the cover has red/orange repeating 300 background with black costume Spider-Man, identify as The Amazing Spider-Man #300, Marvel, 1988.
+- Always return JSON.
+- Condition must be one of:
+  Near Mint, Very Fine, Fine, Very Good, Good, Fair, Poor, Unknown
+- Estimate condition from visible cover.
 - Do not use cover price as value.
 - ebaySearchQuery should be title + issue + publisher + year.
-`;
-
-  const result = await model.generateContent([
-    prompt,
-    {
-      inlineData: {
-        mimeType: image.startsWith("data:image/png")
-          ? "image/png"
-          : "image/jpeg",
-        data: image.split(",")[1],
+      `,
+      {
+        inlineData: {
+          mimeType: image.startsWith("data:image/png")
+            ? "image/png"
+            : "image/jpeg",
+          data: image.split(",")[1],
+        },
       },
-    },
-  ]);
+    ]);
 
-  const text = cleanJsonText(result.response.text());
+    let text = result.response.text();
 
-  const parsed = JSON.parse(text);
+    text = text
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
 
-  return parsed;
-}
+    try {
+      const parsed = JSON.parse(text);
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const image = body.image;
-
-    if (!image || !image.includes(",")) {
       return Response.json({
-        result: JSON.stringify(fallbackResult("No image provided")),
+        result: JSON.stringify(parsed),
+      });
+    } catch {
+      return Response.json({
+        result: JSON.stringify(fallbackResult("AI returned invalid JSON")),
       });
     }
-
-    const models = [
-      "gemini-2.5-flash",
-      "gemini-2.0-flash",
-      "gemini-1.5-flash",
-    ];
-
-    let lastError = "";
-
-    for (const modelName of models) {
-      try {
-        const parsed = await tryAnalyzeWithModel(modelName, image);
-
-        return Response.json({
-          result: JSON.stringify(parsed),
-          modelUsed: modelName,
-        });
-      } catch (error) {
-        console.error(`Model failed: ${modelName}`, error);
-        lastError =
-          error instanceof Error ? error.message : "Unknown Gemini error";
-      }
-    }
-
-    return Response.json({
-      result: JSON.stringify(
-        fallbackResult(`All Gemini models failed: ${lastError}`)
-      ),
-    });
   } catch (error) {
-    console.error("Analyze route failed:", error);
+    console.error("Analyze Route Error:", error);
 
     return Response.json({
       result: JSON.stringify(
         fallbackResult(
-          error instanceof Error ? error.message : "Analyze route failed"
+          error instanceof Error ? error.message : "AI could not analyze image"
         )
       ),
     });
