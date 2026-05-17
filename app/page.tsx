@@ -12,12 +12,7 @@ type ComicResult = {
   searchQuery: string;
 };
 
-async function compressImage(
-  file: File
-): Promise<{
-  file: Blob;
-  dataUrl: string;
-}> {
+async function compressImage(file: File): Promise<{ file: Blob; dataUrl: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     const img = new Image();
@@ -52,10 +47,7 @@ async function compressImage(
             return;
           }
 
-          resolve({
-            file: blob,
-            dataUrl,
-          });
+          resolve({ file: blob, dataUrl });
         },
         "image/jpeg",
         0.75
@@ -71,17 +63,12 @@ async function compressImage(
 
 function calculateWhatnotPrice(ebayAverage: number | null) {
   if (!ebayAverage || ebayAverage <= 0) return null;
-
   return Math.ceil(ebayAverage * 1.15);
 }
 
 function getSubcategory(year: string) {
   const numericYear = Number(year);
-
-  if (!numericYear || Number.isNaN(numericYear)) {
-    return "Modern Comics";
-  }
-
+  if (!numericYear || Number.isNaN(numericYear)) return "Modern Comics";
   return numericYear < 1985 ? "Vintage Comics" : "Modern Comics";
 }
 
@@ -120,25 +107,31 @@ export default function Home() {
     setPreviews(fileArray.map((file) => URL.createObjectURL(file)));
     setResults([]);
 
-    setStatus(`${fileArray.length} image selected.`);
+    setStatus(`${fileArray.length} image selected. Press Analyze.`);
   }
 
   async function uploadImageToBlob(file: Blob, filename: string) {
-    const response = await fetch("/api/upload-image", {
-      method: "POST",
-      headers: {
-        "x-filename": filename,
-      },
-      body: file,
-    });
+    try {
+      const response = await fetch("/api/upload-image", {
+        method: "POST",
+        headers: {
+          "x-filename": filename,
+        },
+        body: file,
+      });
 
-    const data = await response.json();
+      const data = await response.json();
 
-    if (data.error) {
-      throw new Error(data.error);
+      if (data.error) {
+        console.warn("Image upload skipped:", data.error);
+        return "";
+      }
+
+      return data.url as string;
+    } catch (error) {
+      console.warn("Image upload failed, continuing without image URL:", error);
+      return "";
     }
-
-    return data.url as string;
   }
 
   async function analyzeComics() {
@@ -152,16 +145,20 @@ export default function Home() {
 
     const finalResults: ComicResult[] = [];
 
-    try {
-      for (let i = 0; i < files.length; i++) {
-        setStatus(`Scanning comic ${i + 1} of ${files.length}...`);
+    for (let i = 0; i < files.length; i++) {
+      try {
+        setStatus(`Preparing comic ${i + 1} of ${files.length}...`);
 
         const compressed = await compressImage(files[i]);
+
+        setStatus(`Uploading image ${i + 1} of ${files.length}...`);
 
         const imageUrl = await uploadImageToBlob(
           compressed.file,
           `comic-${Date.now()}-${i + 1}.jpg`
         );
+
+        setStatus(`AI scanning comic ${i + 1} of ${files.length}...`);
 
         const analyzeResponse = await fetch("/api/analyze", {
           method: "POST",
@@ -190,6 +187,8 @@ export default function Home() {
           comicData.ebaySearchQuery && comicData.ebaySearchQuery !== "Unknown"
             ? comicData.ebaySearchQuery
             : `${comicData.title} ${comicData.issue}`;
+
+        setStatus(`Checking eBay price for comic ${i + 1}...`);
 
         const ebayResponse = await fetch("/api/ebay", {
           method: "POST",
@@ -221,15 +220,35 @@ export default function Home() {
         });
 
         setResults([...finalResults]);
-      }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unknown error";
 
-      setStatus("Finished scanning.");
-    } catch (error) {
-      console.error(error);
-      setStatus(error instanceof Error ? error.message : "Something went wrong");
+        finalResults.push({
+          image: previews[i] || "",
+          imageUrl: "",
+          comic: {
+            title: "Error",
+            issue: "",
+            publisher: "",
+            year: "",
+            keyInfo: message,
+            condition: "Unknown",
+            conditionReason: "Unknown",
+          },
+          ebayAverage: null,
+          whatnotPrice: null,
+          ebayDebug: {},
+          searchQuery: "",
+        });
+
+        setResults([...finalResults]);
+        setStatus(`Error: ${message}`);
+      }
     }
 
     setLoading(false);
+    setStatus("Finished scanning.");
   }
 
   function exportWhatnotCSV() {
