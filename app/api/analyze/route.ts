@@ -1,6 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+const genAI = new GoogleGenerativeAI(
+  process.env.GEMINI_API_KEY || ""
+);
 
 function fallbackResult(reason: string) {
   return {
@@ -21,84 +23,115 @@ function fallbackResult(reason: string) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+
     const image = body.image;
 
     if (!image || !image.includes(",")) {
       return Response.json({
         result: JSON.stringify(
-          fallbackResult("No image was received by the AI scanner.")
+          fallbackResult("No image provided")
         ),
       });
     }
 
     const model = genAI.getGenerativeModel({
       model: "gemini-1.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+      },
     });
 
-    const result = await model.generateContent([
-      `
+    const prompt = `
 Analyze this comic book cover.
 
 Return ONLY valid JSON.
-No markdown.
-No code blocks.
-No extra text.
-
-Use this exact format:
 
 {
-  "title": "Unknown",
-  "issue": "Unknown",
-  "publisher": "Unknown",
-  "year": "Unknown",
+  "title": "",
+  "issue": "",
+  "publisher": "",
+  "year": "",
   "variant": "",
-  "keyInfo": "Unknown",
-  "importantCharacters": "Unknown",
-  "confidence": "Low",
-  "condition": "Unknown",
-  "conditionReason": "Unknown",
-  "ebaySearchQuery": "Unknown"
+  "keyInfo": "",
+  "importantCharacters": "",
+  "confidence": "",
+  "condition": "",
+  "conditionReason": "",
+  "ebaySearchQuery": ""
 }
 
 Rules:
-- Always return JSON even if unsure.
-- Never throw an error because the image is unclear.
-- Estimate condition from the visible front cover only.
-- Condition must be one of:
-  Near Mint, Very Fine, Fine, Very Good, Good, Fair, Poor, Unknown
-- Do not use the cover price as value.
-- ebaySearchQuery should be title + issue + publisher + year.
-      `,
-      {
-        inlineData: {
-          mimeType: image.startsWith("data:image/png")
-            ? "image/png"
-            : "image/jpeg",
-          data: image.split(",")[1],
-        },
-      },
-    ]);
+- Identify comic title and issue number.
+- Identify publisher and year.
+- Detect key issue info.
+- Estimate comic condition from visible front cover.
+- Condition must be:
+Near Mint, Very Fine, Fine, Very Good, Good, Fair, Poor, Unknown
+- ebaySearchQuery should contain title + issue + publisher + year.
+`;
 
-    const response = await result.response;
-    const text = response.text();
+    const result =
+      await model.generateContent([
+        prompt,
+        {
+          inlineData: {
+            mimeType: "image/jpeg",
+            data: image.split(",")[1],
+          },
+        },
+      ]);
+
+    const response = result.response;
+
+    let text = response.text();
 
     if (!text) {
       return Response.json({
         result: JSON.stringify(
-          fallbackResult("AI returned no text for this image.")
+          fallbackResult(
+            "Gemini returned empty response"
+          )
         ),
       });
     }
 
-    return Response.json({
-      result: text,
-    });
+    // CLEAN RESPONSE
+    text = text
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
+
+    try {
+      const parsed = JSON.parse(text);
+
+      return Response.json({
+        result: JSON.stringify(parsed),
+      });
+    } catch (jsonError) {
+      console.error(
+        "JSON Parse Error:",
+        text
+      );
+
+      return Response.json({
+        result: JSON.stringify(
+          fallbackResult(
+            "Gemini returned invalid JSON"
+          )
+        ),
+      });
+    }
   } catch (error) {
-    console.error("Gemini error:", error);
+    console.error(
+      "Analyze Route Error:",
+      error
+    );
 
     return Response.json({
       result: JSON.stringify(
-        fallbackResult("AI could not analyze this image. Try a clearer photo.")
+        fallbackResult(
+          "AI could not analyze image"
+        )
       ),
     });
   }
